@@ -36,8 +36,17 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # +---------------+
 
 class MaintenanceBot(commands.Bot):
-    def __init__(self, command_prefix):
-        super().__init__(command_prefix=command_prefix)
+    def __init__(self, command_prefix, intents):
+        super().__init__(command_prefix=command_prefix, intents=intents)
+    
+    async def on_ready(self):
+        print('Logged in as {0} ({0.id})'.format(self.user))
+        print('---------')
+    
 
-bot = MaintenanceBot(command_prefix="!")
+intents = discord.Intents.default()
+intents.members = True # Needed in order to store the members' roles
+
+bot = MaintenanceBot(command_prefix=commands.when_mentioned_or("!m "), intents=intents)
+bot.load_extension('cogs.maintenancemode')
 bot.run(TOKEN)
