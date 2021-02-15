@@ -3,6 +3,13 @@ import json
 import discord
 from discord.ext import commands
 
+
+def is_guild_owner():
+    def predicate(ctx):
+        return ctx.guild is not None and ctx.guild.owner_id == ctx.author.id
+    return commands.check(predicate)
+
+
 class MaintenanceMode(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -12,6 +19,7 @@ class MaintenanceMode(commands.Cog):
     
 
     @commands.command(name='enable')
+    @is_guild_owner()
     async def _enable(self, ctx):
         # Check if not already in maintenance mode
         guild_infos = {}
@@ -66,6 +74,7 @@ class MaintenanceMode(commands.Cog):
 
 
     @commands.command(name='disable')
+    @is_guild_owner()
     async def _disable(self, ctx):
         # Check if in maintenance mode
         guild_infos = {}
