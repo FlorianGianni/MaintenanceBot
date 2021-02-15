@@ -1,5 +1,6 @@
 import os
 import json
+import discord
 from discord.ext import commands
 
 class MaintenanceMode(commands.Cog):
@@ -41,9 +42,20 @@ class MaintenanceMode(commands.Cog):
         permissions.update(view_channel=False)
         await ctx.guild.default_role.edit(permissions=permissions)
 
+        # Create a maintenance channel with read-only permission
+        allow = discord.Permissions.none()
+        allow.update(view_channel=True, read_message_history=True)
+        deny = discord.Permissions.all()
+        deny.update(view_channel=False, read_message_history=False)
+        permissions = discord.PermissionOverwrite.from_pair(allow=allow, deny=deny)
+        overwrites={ctx.guild.default_role: permissions}
+        maintenance_channel = await ctx.guild.create_text_channel('maintenance', overwrites=overwrites)
+        maintenance_channel_id = maintenance_channel.id
+        
         # Save in json file
         guild_infos['users_roles'] = users_roles
         guild_infos['everyone_view_channels_permission'] = everyone_view_channels_permission
+        guild_infos['maintenance_channel_id'] = maintenance_channel_id
         guild_infos['is_in_maintenance'] = True
 
         with open(guild_infos_file, 'w') as json_file:
@@ -81,6 +93,11 @@ class MaintenanceMode(commands.Cog):
         permissions.update(view_channel=everyone_view_channels_permission)
         await ctx.guild.default_role.edit(permissions=permissions)
 
+        # Delete maintenance channel
+        maintenance_channel_id = guild_infos['maintenance_channel_id']
+        maintenance_channel = ctx.guild.get_channel(maintenance_channel_id)
+        await maintenance_channel.delete()
+        
         # Update json file
         guild_infos['is_in_maintenance'] = False
 
