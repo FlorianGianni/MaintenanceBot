@@ -8,10 +8,10 @@ class MaintenanceMode(commands.Cog):
         self.guilds_dir = './guilds/'
         if not os.path.exists(self.guilds_dir):
             os.makedirs(self.guilds_dir)
+    
 
-
-    @commands.command(name='start')
-    async def _start(self, ctx):
+    @commands.command(name='enable')
+    async def _enable(self, ctx):
         # Check if not already in maintenance mode
         guild_infos = {}
         guild_infos_file = self.guilds_dir + str(ctx.guild.id) + '.json'
@@ -22,10 +22,13 @@ class MaintenanceMode(commands.Cog):
                 await ctx.send("Maintenance mode already running!")
                 return
         
-        # Store and remove all roles attributions
+        # Kick members from voice channels and store and remove all roles attributions
         users_roles = {}
         for member in ctx.guild.members:
             if member != ctx.author and member != self.bot.user:
+                # Kick member
+                await member.edit(voice_channel=None)
+                # Store and remove his role
                 roles_list = member.roles[1:]
                 roles_ids_list = [role.id for role in roles_list]
                 users_roles[member.id] = roles_ids_list
@@ -37,7 +40,7 @@ class MaintenanceMode(commands.Cog):
         permissions = ctx.guild.default_role.permissions
         permissions.update(view_channel=False)
         await ctx.guild.default_role.edit(permissions=permissions)
-        
+
         # Save in json file
         guild_infos['users_roles'] = users_roles
         guild_infos['everyone_view_channels_permission'] = everyone_view_channels_permission
@@ -50,8 +53,8 @@ class MaintenanceMode(commands.Cog):
         await ctx.message.add_reaction('\N{WHITE HEAVY CHECK MARK}')
 
 
-    @commands.command(name='stop')
-    async def _stop(self, ctx):
+    @commands.command(name='disable')
+    async def _disable(self, ctx):
         # Check if in maintenance mode
         guild_infos = {}
         guild_infos_file = self.guilds_dir + str(ctx.guild.id) + '.json'
@@ -77,7 +80,7 @@ class MaintenanceMode(commands.Cog):
         permissions = ctx.guild.default_role.permissions
         permissions.update(view_channel=everyone_view_channels_permission)
         await ctx.guild.default_role.edit(permissions=permissions)
-        
+
         # Update json file
         guild_infos['is_in_maintenance'] = False
 
