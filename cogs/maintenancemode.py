@@ -28,7 +28,7 @@ class MaintenanceMode(commands.Cog):
             with open(guild_infos_file) as json_file:
                 guild_infos = json.load(json_file)
             if guild_infos['is_in_maintenance'] == True:
-                await ctx.send("Maintenance mode already running!")
+                await ctx.send("Maintenance mode already enabled!")
                 return
         
         # Kick members from voice channels and store and remove all roles attributions
@@ -80,13 +80,13 @@ class MaintenanceMode(commands.Cog):
         guild_infos = {}
         guild_infos_file = self.guilds_dir + str(ctx.guild.id) + '.json'
         if not os.path.exists(guild_infos_file):
-            await ctx.send("Maintenance mode already stopped!")
+            await ctx.send("Maintenance mode already disabled!")
             return
         else:
             with open(guild_infos_file) as json_file:
                 guild_infos = json.load(json_file)
             if guild_infos['is_in_maintenance'] == False:
-                await ctx.send("Maintenance mode already stopped!")
+                await ctx.send("Maintenance mode already disabled!")
                 return
         
         # Rerieve and re-add all roles attributions
