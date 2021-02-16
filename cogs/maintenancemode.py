@@ -34,7 +34,7 @@ class MaintenanceMode(commands.Cog):
         # Kick members from voice channels and store and remove all roles attributions
         users_roles = {}
         for member in ctx.guild.members:
-            if member != ctx.author and member != self.bot.user:
+            if member != ctx.author and not member.bot:
                 # Kick member
                 await member.edit(voice_channel=None)
                 # Store and remove his role
