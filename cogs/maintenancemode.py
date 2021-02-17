@@ -18,14 +18,18 @@ class MaintenanceMode(commands.Cog):
             os.makedirs(self.guilds_dir)
     
 
-    def __is_in_maintenance(self, guild_id):
+    def __get_maintenance_mode(self, guild_id):
+        # 0 -> Disabled
+        # 1 -> Stopping
+        # 2 -> Starting
+        # 3 -> Enabled
         guild_infos_file = self.guilds_dir + str(guild_id) + '.json'
         if not os.path.exists(guild_infos_file):
-            return False
+            return 0
         else:
             with open(guild_infos_file) as json_file:
                 guild_infos = json.load(json_file)
-            return guild_infos['is_in_maintenance']
+            return guild_infos['maintenance_mode']
     
 
     def __get_guild_infos(self, guild_id):
@@ -35,7 +39,7 @@ class MaintenanceMode(commands.Cog):
                 guild_infos = json.load(json_file)
             return guild_infos
         else:
-            return None
+            return {}
     
 
     def __dump_guild_infos(self, guild_id, guild_infos):
@@ -48,17 +52,19 @@ class MaintenanceMode(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member):
-        if self.__is_in_maintenance(member.guild.id):
+        # If a member joins during maintenance, add maintenance role
+        if self.__get_maintenance_mode(member.guild.id) in (2, 3):
             guild_infos = self.__get_guild_infos(member.guild.id)
-            maintenance_role_id = guild_infos['maintenance_role_id']
-            maintenance_role = member.guild.get_role(maintenance_role_id)
-            await member.edit(roles=[maintenance_role])
+            if 'maintenance_role_id' in guild_infos.keys():
+                maintenance_role_id = guild_infos['maintenance_role_id']
+                maintenance_role = member.guild.get_role(maintenance_role_id)
+                await member.edit(roles=[maintenance_role])
     
 
     @commands.Cog.listener()
     async def on_guild_channel_create(self, channel):
-        # If in maintenance, add maintenance role permission to new channel
-        if self.__is_in_maintenance(channel.guild.id):
+        # If a channel is created during maintenance, add maintenance role overwrite
+        if self.__get_maintenance_mode(channel.guild.id) == 3:
             guild_infos = self.__get_guild_infos(channel.guild.id)
             maintenance_role_id = guild_infos['maintenance_role_id']
             maintenance_role = channel.guild.get_role(maintenance_role_id)
@@ -71,15 +77,32 @@ class MaintenanceMode(commands.Cog):
     @commands.command(name='enable')
     @is_guild_owner()
     async def _enable(self, ctx):
-        # Check if not already in maintenance mode
-        if self.__is_in_maintenance(ctx.guild.id):
-            await ctx.send("Maintenance mode already enabled!")
+        # Check if maintenance mode can be enabled
+        if self.__get_maintenance_mode(ctx.guild.id) == 1:
+            await ctx.message.add_reaction('\N{CROSS MARK}')
+            await ctx.reply("Maintenance mode is stopping! Please wait before trying to re-enable it.")
             return
+        elif self.__get_maintenance_mode(ctx.guild.id) == 2:
+            await ctx.message.add_reaction('\N{CROSS MARK}')
+            await ctx.reply("Maintenance mode is already starting!")
+            return
+        elif self.__get_maintenance_mode(ctx.guild.id) == 3:
+            await ctx.message.add_reaction('\N{CROSS MARK}')
+            await ctx.reply("Maintenance mode is already enabled!")
+            return
+        
+        await ctx.message.add_reaction('\N{HOURGLASS WITH FLOWING SAND}')
+        
+        # Store information about maintenance mode starting
+        guild_infos = {}
+        guild_infos['maintenance_mode'] = 2
+        self.__dump_guild_infos(ctx.guild.id, guild_infos)
 
-        # Create a maintenance role without any permissions in aevery channel
+        # Create a maintenance role without any permission in every channel
         maintenance_role = await ctx.guild.create_role(name='MaintenanceRole')
-        maintenance_role_id = maintenance_role.id
-        channels = await ctx.guild.fetch_channels()
+        guild_infos['maintenance_role_id'] = maintenance_role.id
+        self.__dump_guild_infos(ctx.guild.id, guild_infos)
+        channels = ctx.guild.channels
         for channel in channels:
             allow = discord.Permissions.none()
             deny = discord.Permissions.all()
@@ -94,69 +117,91 @@ class MaintenanceMode(commands.Cog):
         permissions = discord.PermissionOverwrite.from_pair(allow=allow, deny=deny)
         overwrites={ctx.guild.default_role: permissions}
         maintenance_channel = await ctx.guild.create_text_channel('maintenance', overwrites=overwrites)
-        maintenance_channel_id = maintenance_channel.id
+        guild_infos['maintenance_channel_id'] = maintenance_channel.id
+        self.__dump_guild_infos(ctx.guild.id, guild_infos)
         await maintenance_channel.send('This server is in maintenance!')
         
-        # Disconnect members from voice channels and store and remove all roles attributions
+        # Store each role attributions
         users_roles = {}
         for member in ctx.guild.members:
             if member != ctx.author and not member.bot:
-                # Store and remove his role
-                roles_list = member.roles[1:]
-                roles_ids_list = [role.id for role in roles_list]
+                # Store user role
+                roles_ids_list = [role.id for role in member.roles[1:]]
                 users_roles[member.id] = roles_ids_list
-                await member.edit(roles=[maintenance_role])
+        
+        guild_infos['users_roles'] = users_roles
+        self.__dump_guild_infos(ctx.guild.id, guild_infos)
 
+        # Disconnect all members from voice channels and add maintenance role
+        for member in ctx.guild.members:
+            if member != ctx.author and not member.bot:
+                # Remove every role and add maintenance role
+                await member.edit(roles=[maintenance_role])
             # Disconnect member from voice channel (including bots)
             await member.edit(voice_channel=None)
         
-        # Save in json file
-        guild_infos = {}
-        guild_infos['maintenance_role_id'] = maintenance_role_id
-        guild_infos['maintenance_channel_id'] = maintenance_channel_id
-        guild_infos['users_roles'] = users_roles
-        guild_infos['is_in_maintenance'] = True
-
+        # Store information about maintenance mode being enabled
+        guild_infos['maintenance_mode'] = 3
         self.__dump_guild_infos(ctx.guild.id, guild_infos)
 
-        # Feedback
+        # Confirms to user that maintenance mode is enabled
+        await ctx.message.clear_reactions()
         await ctx.message.add_reaction('\N{WHITE HEAVY CHECK MARK}')
+        await ctx.reply("Maintenance mode is now enabled!")
 
 
     @commands.command(name='disable')
     @is_guild_owner()
     async def _disable(self, ctx):
-        # Check if in maintenance mode
-        if not self.__is_in_maintenance(ctx.guild.id):
-            await ctx.send("Maintenance mode already disabled!")
+        # Check if maintenance mode can be disabled
+        if self.__get_maintenance_mode(ctx.guild.id) == 0:
+            await ctx.message.add_reaction('\N{CROSS MARK}')
+            await ctx.reply("Maintenance mode is already disabled!")
             return
-
-        guild_infos = self.__get_guild_infos(ctx.guild.id)
+        elif self.__get_maintenance_mode(ctx.guild.id) == 1:
+            await ctx.message.add_reaction('\N{CROSS MARK}')
+            await ctx.reply("Maintenance mode is already stopping!")
+            return
+        elif self.__get_maintenance_mode(ctx.guild.id) == 2:
+            await ctx.message.add_reaction('\N{CROSS MARK}')
+            await ctx.reply("Maintenance mode is starting! Please wait before trying to disable it.")
+            return
         
-        # Rerieve and re-add all roles attributions
+        await ctx.message.add_reaction('\N{HOURGLASS WITH FLOWING SAND}')
+
+        # Store information about maintenance mode stopping
+        guild_infos = self.__get_guild_infos(ctx.guild.id)
+        guild_infos['maintenance_mode'] = 1
+        self.__dump_guild_infos(ctx.guild.id, guild_infos)
+        
+        # Re-add each role attributions
         for member_id, roles_ids in guild_infos['users_roles'].items():
             member = ctx.guild.get_member(int(member_id))
             if member is not None:
                 roles_list = [ctx.guild.get_role(role_id) for role_id in roles_ids if ctx.guild.get_role(role_id) is not None]
                 await member.edit(roles=roles_list)
         
-        # Delete maintenance channel
+        # Delete the maintenance channel
         maintenance_channel_id = guild_infos['maintenance_channel_id']
         maintenance_channel = ctx.guild.get_channel(maintenance_channel_id)
-        await maintenance_channel.delete()
+        if maintenance_channel is not None:
+            await maintenance_channel.delete()
 
         # Delete the maintenance role
         maintenance_role_id = guild_infos['maintenance_role_id']
-        await ctx.guild.get_role(maintenance_role_id).delete()
+        maintenance_role = ctx.guild.get_role(maintenance_role_id)
+        if maintenance_role is not None:
+            await maintenance_role.delete()
         
-        # Update json file
+        # Store information about maintenance mode being disabled
         guild_infos = {}
-        guild_infos['is_in_maintenance'] = False
-
+        guild_infos['maintenance_mode'] = 0
         self.__dump_guild_infos(ctx.guild.id, guild_infos)
 
-        # Feedback
+        # Confirms to user that maintenance mode is disabled
+        await ctx.message.clear_reactions()
         await ctx.message.add_reaction('\N{WHITE HEAVY CHECK MARK}')
+        await ctx.reply("Maintenance mode is now disabled!")
 
 
 def setup(bot):
